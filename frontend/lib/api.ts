@@ -19,6 +19,7 @@ export interface AIInsights {
   summary: string;
   genre_prediction: string;
   sentiment: string;
+  sentiment_score: number;
   recommendations: string[];
   created_at: string;
 }
@@ -29,8 +30,17 @@ export interface QAHistory {
   book_title: string;
   question: string;
   answer: string;
-  sources: { index: number; text: string }[];
+  sources: Source[];
   created_at: string;
+}
+
+export interface Source {
+  index: number;
+  book_id?: number;
+  book_title?: string;
+  chunk_index?: number;
+  source?: string;
+  text: string;
 }
 
 export async function fetchBooks(search = '', genre = ''): Promise<Book[]> {

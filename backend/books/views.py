@@ -4,11 +4,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.conf import settings
 from django.db.models import Q
+import logging
 
 from .models import Book, BookChunk, AIInsights, QAHistory
 from .serializers import BookSerializer, BookListSerializer, AIInsightsSerializer, QAHistorySerializer
 from .vector_store import (
-    generate_embeddings, add_chunks_to_vector_store, 
+    add_chunks_to_vector_store, 
     similarity_search, delete_book_from_vector_store,
     add_chunks_to_global_store, global_similarity_search
 )
@@ -16,10 +17,17 @@ from .llm_integration import (
     generate_summary, classify_genre, analyze_sentiment, 
     get_recommendations, rag_answer
 )
-from .scraper import scrape_books
+
+# Import new services
+from .services.scraper import scrape_books, get_available_sources, is_valid_source
+from .services.chunker import chunk_text
+from .services.rag import ask_question as ragAskQuestion
+
+logger = logging.getLogger(__name__)
 
 
 def chunk_text(text, chunk_size=500, overlap=50):
+    """Split text into overlapping chunks."""
     if not text or len(text) < chunk_size:
         return [text] if text else []
     
@@ -50,6 +58,8 @@ class BookViewSet(viewsets.ModelViewSet):
 
 
 class BookListView(APIView):
+    """List all books with search and genre filtering."""
+    
     def get(self, request):
         search = request.query_params.get('search', '')
         genre = request.query_params.get('genre', '')
@@ -69,6 +79,8 @@ class BookListView(APIView):
 
 
 class BookDetailView(APIView):
+    """Get single book details."""
+    
     def get(self, request, pk):
         try:
             book = Book.objects.get(pk=pk)
@@ -79,6 +91,8 @@ class BookDetailView(APIView):
 
 
 class BookChunksView(APIView):
+    """Get chunks for a book."""
+    
     def get(self, request, pk):
         try:
             book = Book.objects.get(pk=pk)
@@ -91,6 +105,8 @@ class BookChunksView(APIView):
 
 
 class BookInsightsView(APIView):
+    """Get or generate AI insights for a book."""
+    
     def get(self, request, pk):
         try:
             insights = AIInsights.objects.get(book_id=pk)
@@ -100,6 +116,7 @@ class BookInsightsView(APIView):
             return Response({'error': 'Insights not found'}, status=404)
     
     def post(self, request, pk):
+        """Generate new insights."""
         try:
             book = Book.objects.get(pk=pk)
         except Book.DoesNotExist:
@@ -107,6 +124,7 @@ class BookInsightsView(APIView):
         
         book_text = book.description or f"{book.title} by {book.author}"
         
+        # Generate insights
         summary = generate_summary(book_text)
         genre = classify_genre(book_text)
         sentiment_data = analyze_sentiment(book_text)
@@ -134,6 +152,8 @@ class BookInsightsView(APIView):
 
 
 class BookRelatedView(APIView):
+    """Get related books."""
+    
     def get(self, request, pk):
         try:
             book = Book.objects.get(pk=pk)
@@ -149,12 +169,38 @@ class BookRelatedView(APIView):
 
 
 class ScrapeBooksView(APIView):
+    """
+    Scrape books from web with proper source handling.
+    
+    POST /api/scrape/
+    {
+        "source": "toscrape",  # or "openlibrary", "gutenberg"
+        "count": 10,
+        "num_pages": 2
+    }
+    """
+    
     def post(self, request):
-        source = request.data.get('source', 'goodreads')
+        # FIXED: Source parameter now properly controls scraping
+        source = request.data.get('source', 'toscrape')
         count = request.data.get('count', 10)
         num_pages = request.data.get('num_pages', 2)
         
-        scraped_books = scrape_books(count=count, num_pages=num_pages)
+        # Validate source
+        if not is_valid_source(source):
+            return Response({
+                'error': f'Invalid source: {source}',
+                'available_sources': get_available_sources()
+            }, status=400)
+        
+        # Scrape using new service
+        scraped_books = scrape_books(source=source, count=count, num_pages=num_pages)
+        
+        if not scraped_books:
+            return Response({
+                'error': 'No books scraped. Check if source is available.',
+                'source': source
+            }, status=400)
         
         created_books = []
         for book_data in scraped_books:
@@ -168,6 +214,7 @@ class ScrapeBooksView(APIView):
                 genre=book_data.get('genre', 'Fiction')
             )
             
+            # Create chunks
             text_content = f"{book.title} {book.author} {book.description}"
             chunks = chunk_text(text_content, settings.CHUNK_SIZE, settings.CHUNK_OVERLAP)
             
@@ -178,17 +225,21 @@ class ScrapeBooksView(APIView):
                     chunk_index=i
                 )
             
+            # Add to vector store
             add_chunks_to_vector_store(book.id, chunks)
             add_chunks_to_global_store(book.id, book.title, chunks)
             created_books.append(book.id)
         
         return Response({
-            'message': f'Successfully scraped and created {len(created_books)} books',
+            'message': f'Successfully scraped {len(created_books)} books',
+            'source': source,
             'book_ids': created_books
         })
 
 
 class GenerateEmbeddingsView(APIView):
+    """Regenerate embeddings for a book."""
+    
     def post(self, request, pk):
         try:
             book = Book.objects.get(pk=pk)
@@ -218,6 +269,16 @@ class GenerateEmbeddingsView(APIView):
 
 
 class AskQuestionView(APIView):
+    """
+    RAG question answering endpoint.
+    
+    POST /api/qa/ask/
+    {
+        "question": "What is this book about?",
+        "book_id": 1  # optional - if empty, searches all books
+    }
+    """
+    
     def post(self, request):
         question = request.data.get('question', '')
         book_id = request.data.get('book_id')
@@ -225,66 +286,15 @@ class AskQuestionView(APIView):
         if not question:
             return Response({'error': 'Question is required'}, status=400)
         
-        if book_id:
-            try:
-                book = Book.objects.get(pk=book_id)
-            except Book.DoesNotExist:
-                return Response({'error': 'Book not found'}, status=404)
-            
-            results = similarity_search(book_id, question, top_k=5)
-            
-            context_chunks = []
-            if results and results.get('documents'):
-                context_chunks = results['documents'][0]
-            
-            answer = rag_answer(question, context_chunks, book.title)
-            
-            sources = []
-            for i, chunk in enumerate(context_chunks):
-                sources.append({
-                    'index': i + 1,
-                    'text': chunk[:200] + '...' if len(chunk) > 200 else chunk
-                })
-            
-            qa = QAHistory.objects.create(
-                book=book,
-                question=question,
-                answer=answer,
-                sources=sources
-            )
-        else:
-            # BUG 4 FIX: Search across all books
-            results = global_similarity_search(question, top_k=5)
-            context_chunks = []
-            source_book_ids = set()
-            if results and results.get('documents'):
-                context_chunks = results['documents'][0]
-                for meta in results.get('metadatas', [[]])[0]:
-                    if meta:
-                        source_book_ids.add(meta.get('book_id'))
-            
-            source_books = Book.objects.filter(id__in=source_book_ids)
-            source_titles = ", ".join([b.title for b in source_books]) if source_books else "multiple books"
-            
-            answer = rag_answer(question, context_chunks, source_titles)
-            
-            sources = [{'index': i+1, 'text': c[:200]+'...' if len(c)>200 else c} for i,c in enumerate(context_chunks)]
-            
-            qa = QAHistory.objects.create(
-                question=question,
-                answer=answer,
-                sources=sources
-            )
+        # Use the new RAG service for proper citations
+        result = ragAskQuestion(question, book_id)
         
-        return Response({
-            'question': question,
-            'answer': answer,
-            'sources': sources,
-            'qa_id': qa.id
-        })
+        return Response(result)
 
 
 class QAHistoryView(APIView):
+    """Get Q&A history."""
+    
     def get(self, request):
         book_id = request.query_params.get('book_id')
         
@@ -298,6 +308,8 @@ class QAHistoryView(APIView):
 
 
 class SeedBooksView(APIView):
+    """Seed sample books for demo."""
+    
     def post(self, request):
         sample_books = [
             {
@@ -337,15 +349,6 @@ class SeedBooksView(APIView):
                 'book_url': 'https://www.gutenberg.org/ebooks/1342'
             },
             {
-                'title': 'The Catcher in the Rye',
-                'author': 'J.D. Salinger',
-                'description': 'A story about a teenage boy named Holden Caulfield who has been expelled from prep school and wanders around New York City for three days, dealing with themes of teenage angst, alienation, and identity.',
-                'rating': 4.3,
-                'genre': 'Fiction',
-                'cover_url': 'https://covers.openlibrary.org/b/id/8231637-L.jpg',
-                'book_url': 'https://www.gutenberg.org/ebooks/8232'
-            },
-            {
                 'title': 'The Hobbit',
                 'author': 'J.R.R. Tolkien',
                 'description': 'A fantasy novel about the adventures of the hobbit Bilbo Baggins, who is recruited by the wizard Gandalf to help a group of dwarves reclaim their homeland from the dragon Smaug.',
@@ -371,6 +374,15 @@ class SeedBooksView(APIView):
                 'genre': 'Fiction',
                 'cover_url': 'https://covers.openlibrary.org/b/id/7387966-L.jpg',
                 'book_url': 'https://www.paulocoelho.com/thealchemist/'
+            },
+            {
+                'title': '1984',
+                'author': 'George Orwell',
+                'description': 'A dystopian social science fiction novel set in a totalitarian society where truth is flexible and the state controls all information. The protagonist Winston Smith works at the Ministry of Truth and secretly rebels against the Party.',
+                'rating': 4.5,
+                'genre': 'Science Fiction',
+                'cover_url': 'https://covers.openlibrary.org/b/id/7222336-L.jpg',
+                'book_url': 'https://www.gutenberg.org/ebooks/2148'
             }
         ]
         
