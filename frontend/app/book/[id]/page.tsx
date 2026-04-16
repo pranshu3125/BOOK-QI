@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/router';
+import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeft, Star, Loader2, ExternalLink } from 'lucide-react';
@@ -20,8 +20,8 @@ import {
 } from '@/lib/api';
 
 export default function BookDetail() {
-  const router = useRouter();
-  const { id } = router.query;
+  const params = useParams();
+  const id = params?.id;
 
   const [book, setBook] = useState<Book | null>(null);
   const [insights, setInsights] = useState<AIInsights | null>(null);
@@ -32,15 +32,14 @@ export default function BookDetail() {
   const [answerLoading, setAnswerLoading] = useState(false);
 
   useEffect(() => {
-    if (!id) return;
-
     const loadData = async () => {
       setLoading(true);
       try {
+        const bookId = Number(id);
         const [bookData, insightsData, relatedData] = await Promise.all([
-          fetchBookDetail(Number(id)),
-          fetchBookInsights(Number(id)).catch(() => null),
-          fetchRelatedBooks(Number(id)),
+          fetchBookDetail(bookId),
+          fetchBookInsights(bookId).catch(() => null),
+          fetchRelatedBooks(bookId),
         ]);
         setBook(bookData);
         setInsights(insightsData);
@@ -52,11 +51,12 @@ export default function BookDetail() {
       }
     };
 
-    loadData();
+    if (id) {
+      loadData();
+    }
   }, [id]);
 
   const handleGenerateInsights = async () => {
-    if (!id) return;
     setInsightsLoading(true);
     try {
       const data = await generateInsights(Number(id));
@@ -69,7 +69,6 @@ export default function BookDetail() {
   };
 
   const handleAskQuestion = async (question: string) => {
-    if (!id) return;
     setAnswerLoading(true);
     try {
       const data = await askQuestion(question, Number(id));

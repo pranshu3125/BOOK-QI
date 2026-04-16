@@ -32,7 +32,7 @@ class BookListSerializer(serializers.ModelSerializer):
 class AIInsightsSerializer(serializers.ModelSerializer):
     class Meta:
         model = AIInsights
-        fields = ['id', 'summary', 'genre_prediction', 'sentiment', 'recommendations', 'created_at', 'updated_at']
+        fields = ['id', 'summary', 'genre_prediction', 'sentiment', 'sentiment_score', 'recommendations', 'created_at', 'updated_at']
 
 
 class QAHistorySerializer(serializers.ModelSerializer):

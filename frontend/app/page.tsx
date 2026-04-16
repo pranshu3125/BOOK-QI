@@ -5,17 +5,21 @@ import { Search, Loader2, Sparkles, Globe } from 'lucide-react';
 import BookCard from '@/components/BookCard';
 import { fetchBooks, seedBooks, scrapeBooks, Book } from '@/lib/api';
 
+const GENRES = ['All', 'Fiction', 'Fantasy', 'Mystery', 'Science Fiction', 'Romance', 'Non-Fiction', 'Thriller'];
+
 export default function Dashboard() {
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [selectedGenre, setSelectedGenre] = useState('');
   const [seeding, setSeeding] = useState(false);
   const [scraping, setScraping] = useState(false);
 
   const loadBooks = async () => {
     setLoading(true);
     try {
-      const data = await fetchBooks(search);
+      const genre = selectedGenre !== 'All' ? selectedGenre : '';
+      const data = await fetchBooks(search, genre);
       setBooks(data);
     } catch (error) {
       console.error('Failed to load books:', error);
@@ -113,6 +117,22 @@ export default function Dashboard() {
               <span>{scraping ? 'Scraping...' : 'Scrape Books'}</span>
             </button>
           </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-6">
+          {GENRES.map(genre => (
+            <button
+              key={genre}
+              onClick={() => { setSelectedGenre(genre); loadBooks(); }}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                selectedGenre === genre || (genre === 'All' && !selectedGenre)
+                  ? 'bg-primary text-white'
+                  : 'bg-gray-100 text-text-secondary hover:bg-gray-200'
+              }`}
+            >
+              {genre}
+            </button>
+          ))}
         </div>
 
         {loading ? (

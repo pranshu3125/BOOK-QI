@@ -6,7 +6,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from bs4 import BeautifulSoup
 import time
-import random
 
 def get_driver():
     chrome_options = Options()
@@ -20,156 +19,83 @@ def get_driver():
     driver.set_page_load_timeout(30)
     return driver
 
-def parse_goodreads_book(url):
+def scrape_books_toscrape(num_pages=2):
+    """Scrape books.toscrape.com - a legal practice scraping site."""
     driver = get_driver()
     books_data = []
+    base_url = "https://books.toscrape.com/catalogue/"
+    
+    rating_map = {'One': 1.0, 'Two': 2.0, 'Three': 3.0, 'Four': 4.0, 'Five': 5.0}
     
     try:
-        driver.get(url)
-        time.sleep(3)
-        
-        for i in range(3):
+        page = 1
+        while page <= num_pages:
+            url = "https://books.toscrape.com/catalogue/page-{}.html".format(page)
+            driver.get(url)
+            time.sleep(1.5)
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             
-            book_cards = soup.select('div[data-testid="bookListBookCover"]')
-            
-            if not book_cards:
-                book_cards = soup.select('.bookListItem')
-            
-            if not book_cards:
-                book_cards = soup.select('[class*="BookCard"]')
-            
-            for card in book_cards[:10]:
+            articles = soup.select('article.product_pod')
+            if not articles:
+                break
+                
+            for article in articles:
                 try:
-                    title_elem = card.select_one('[data-testid="bookTitle"]')
-                    if not title_elem:
-                        title_elem = card.select_one('a[class*="title"]')
-                    title = title_elem.text.strip() if title_elem else "Unknown Title"
+                    title_tag = article.select_one('h3 a')
+                    title = title_tag['title'] if title_tag else 'Unknown'
                     
-                    author_elem = card.select_one('[data-testid="bookMetaAuthorLink"]')
-                    if not author_elem:
-                        author_elem = card.select_one('a[class*="author"]')
-                    author = author_elem.text.strip() if author_elem else "Unknown Author"
+                    relative_url = title_tag['href'].replace('../', '') if title_tag else ''
+                    book_url = base_url + relative_url
                     
-                    rating = None
-                    rating_elem = card.select_one('[data-testid="bookAvgRating"]')
-                    if rating_elem:
-                        rating_text = rating_elem.text.strip()
-                        try:
-                            rating = float(rating_text.split()[0])
-                        except:
-                            pass
+                    rating_class = article.select_one('p.star-rating')
+                    rating_word = rating_class['class'][1] if rating_class else 'One'
+                    rating = rating_map.get(rating_word, 1.0)
                     
-                    cover_url = ""
-                    cover_elem = card.select_one('img')
-                    if cover_elem:
-                        cover_url = cover_elem.get('src', '')
+                    price_tag = article.select_one('p.price_color')
+                    price = price_tag.text.strip() if price_tag else ''
                     
-                    description = ""
-                    desc_elem = card.select_one('[data-testid="bookDescription"]')
-                    if desc_elem:
-                        description = desc_elem.text.strip()
+                    img_tag = article.select_one('img.thumbnail')
+                    cover_url = 'https://books.toscrape.com/' + img_tag['src'].replace('../', '') if img_tag else ''
                     
-                    book_url = ""
-                    link_elem = card.select_one('a[class*="title"]')
-                    if link_elem:
-                        book_url = link_elem.get('href', '')
-                        if book_url and not book_url.startswith('http'):
-                            book_url = f"https://www.goodreads.com{book_url}"
+                    description = ''
+                    genre = 'Fiction'
+                    try:
+                        driver.get(book_url)
+                        time.sleep(1)
+                        detail_soup = BeautifulSoup(driver.page_source, 'html.parser')
+                        desc_tag = detail_soup.select_one('article.product_page p')
+                        if desc_tag:
+                            description = desc_tag.text.strip()
+                        breadcrumbs = detail_soup.select('ul.breadcrumb li')
+                        if len(breadcrumbs) >= 3:
+                            genre = breadcrumbs[2].text.strip()
+                    except:
+                        pass
                     
                     books_data.append({
                         'title': title,
-                        'author': author,
+                        'author': 'Unknown',
                         'rating': rating,
+                        'price': price,
                         'cover_url': cover_url,
-                        'description': description,
                         'book_url': book_url,
-                        'genre': 'Fiction'
+                        'description': description,
+                        'genre': genre,
                     })
-                    
                 except Exception as e:
+                    print(f"Error parsing book: {e}")
                     continue
             
-            try:
-                next_button = driver.find_element(By.CSS_SELECTOR, '[data-testid="paginationNextButton"]')
-                if next_button:
-                    driver.execute_script("arguments[0].click();", next_button)
-                    time.sleep(2)
-            except:
-                break
-                
+            page += 1
+            
     except Exception as e:
-        print(f"Error parsing Goodreads: {e}")
+        print(f"Scraping error: {e}")
     finally:
         driver.quit()
     
     return books_data
 
-def parse_openlibrary_book(url):
-    driver = get_driver()
-    books_data = []
-    
-    try:
-        driver.get(url)
-        time.sleep(3)
-        
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
-        
-        book_cards = soup.select('div.bookcover')
-        
-        if not book_cards:
-            book_cards = soup.select('[class*="book"]')
-        
-        for card in book_cards[:10]:
-            try:
-                title_elem = card.select_one('a.title')
-                title = title_elem.text.strip() if title_elem else "Unknown Title"
-                
-                author = "Unknown Author"
-                author_elem = card.select_one('a.author')
-                if author_elem:
-                    author = author_elem.text.strip()
-                
-                cover_url = ""
-                cover_elem = card.select_one('img')
-                if cover_elem:
-                    cover_url = cover_elem.get('src', '')
-                
-                book_url = ""
-                if title_elem:
-                    book_url = title_elem.get('href', '')
-                    if book_url and not book_url.startswith('http'):
-                        book_url = f"https://openlibrary.org{book_url}"
-                
-                books_data.append({
-                    'title': title,
-                    'author': author,
-                    'rating': None,
-                    'cover_url': cover_url,
-                    'description': '',
-                    'book_url': book_url,
-                    'genre': 'Fiction'
-                })
-                
-            except Exception as e:
-                continue
-                
-    except Exception as e:
-        print(f"Error parsing OpenLibrary: {e}")
-    finally:
-        driver.quit()
-    
-    return books_data
-
-def scrape_books(sources=['goodreads'], count=10):
-    all_books = []
-    
-    if 'goodreads' in sources:
-        goodreads_books = parse_goodreads_book("https://www.goodreads.com/list/show/1.Best_Books_Ever")
-        all_books.extend(goodreads_books)
-    
-    if 'openlibrary' in sources:
-        ol_books = parse_openlibrary_book("https://openlibrary.org/subjects/fiction")
-        all_books.extend(ol_books)
-    
-    return all_books[:count]
+def scrape_books(sources=None, count=10, num_pages=2):
+    """Main entry point. Scrapes books.toscrape.com by default."""
+    books = scrape_books_toscrape(num_pages=num_pages)
+    return books[:count]

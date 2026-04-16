@@ -3,7 +3,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'django-insecure-bookmind-secret-key-change-in-production'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-bookmind-secret-key-change-in-production')
 
 DEBUG = True
 
@@ -78,6 +78,15 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOW_ALL_ORIGINS = True
 
+# Django Cache Configuration (FEATURE 3)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
+        'LOCATION': str(BASE_DIR / 'django_cache'),
+        'TIMEOUT': 86400,  # 24 hours
+    }
+}
+
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
@@ -95,7 +104,8 @@ EMBEDDING_MODEL = 'sentence-transformers/all-MiniLM-L6-v2'
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
-# LLM Settings (LM Studio)
-LLM_BASE_URL = 'http://localhost:1234/v1'
-LLM_MODEL = 'local-model'
-OPENAI_API_KEY = 'not-needed'
+# LLM Settings (FEATURE 4)
+LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'lmstudio')  # 'lmstudio' or 'claude'
+LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'http://localhost:1234/v1')
+LLM_MODEL = os.environ.get('LLM_MODEL', 'local-model')
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')

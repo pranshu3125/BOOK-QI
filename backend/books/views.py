@@ -4,13 +4,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.conf import settings
 from django.db.models import Q
-import hashlib
 
 from .models import Book, BookChunk, AIInsights, QAHistory
 from .serializers import BookSerializer, BookListSerializer, AIInsightsSerializer, QAHistorySerializer
 from .vector_store import (
     generate_embeddings, add_chunks_to_vector_store, 
-    similarity_search, delete_book_from_vector_store
+    similarity_search, delete_book_from_vector_store,
+    add_chunks_to_global_store, global_similarity_search
 )
 from .llm_integration import (
     generate_summary, classify_genre, analyze_sentiment, 
@@ -109,7 +109,7 @@ class BookInsightsView(APIView):
         
         summary = generate_summary(book_text)
         genre = classify_genre(book_text)
-        sentiment = analyze_sentiment(book_text)
+        sentiment_data = analyze_sentiment(book_text)
         
         all_books = Book.objects.all().values('title', 'author', 'genre')
         recommendations = get_recommendations(
@@ -123,7 +123,8 @@ class BookInsightsView(APIView):
             defaults={
                 'summary': summary,
                 'genre_prediction': genre,
-                'sentiment': sentiment,
+                'sentiment': sentiment_data.get('label', 'Neutral'),
+                'sentiment_score': sentiment_data.get('score', 0.5),
                 'recommendations': recommendations
             }
         )
@@ -151,8 +152,9 @@ class ScrapeBooksView(APIView):
     def post(self, request):
         source = request.data.get('source', 'goodreads')
         count = request.data.get('count', 10)
+        num_pages = request.data.get('num_pages', 2)
         
-        scraped_books = scrape_books(sources=[source], count=count)
+        scraped_books = scrape_books(count=count, num_pages=num_pages)
         
         created_books = []
         for book_data in scraped_books:
@@ -169,14 +171,15 @@ class ScrapeBooksView(APIView):
             text_content = f"{book.title} {book.author} {book.description}"
             chunks = chunk_text(text_content, settings.CHUNK_SIZE, settings.CHUNK_OVERLAP)
             
-            for i, chunk_text in enumerate(chunks):
+            for i, chunk_content in enumerate(chunks):
                 BookChunk.objects.create(
                     book=book,
-                    chunk_text=chunk_text,
+                    chunk_text=chunk_content,
                     chunk_index=i
                 )
             
             add_chunks_to_vector_store(book.id, chunks)
+            add_chunks_to_global_store(book.id, book.title, chunks)
             created_books.append(book.id)
         
         return Response({
@@ -198,14 +201,15 @@ class GenerateEmbeddingsView(APIView):
         text_content = f"{book.title} {book.author} {book.description}"
         chunks = chunk_text(text_content, settings.CHUNK_SIZE, settings.CHUNK_OVERLAP)
         
-        for i, chunk_text in enumerate(chunks):
+        for i, chunk_content in enumerate(chunks):
             BookChunk.objects.create(
                 book=book,
-                chunk_text=chunk_text,
+                chunk_text=chunk_content,
                 chunk_index=i
             )
         
         add_chunks_to_vector_store(book.id, chunks)
+        add_chunks_to_global_store(book.id, book.title, chunks)
         
         return Response({
             'message': f'Generated {len(chunks)} embeddings',
@@ -249,8 +253,23 @@ class AskQuestionView(APIView):
                 sources=sources
             )
         else:
-            answer = "Please select a book to ask questions about."
-            sources = []
+            # BUG 4 FIX: Search across all books
+            results = global_similarity_search(question, top_k=5)
+            context_chunks = []
+            source_book_ids = set()
+            if results and results.get('documents'):
+                context_chunks = results['documents'][0]
+                for meta in results.get('metadatas', [[]])[0]:
+                    if meta:
+                        source_book_ids.add(meta.get('book_id'))
+            
+            source_books = Book.objects.filter(id__in=source_book_ids)
+            source_titles = ", ".join([b.title for b in source_books]) if source_books else "multiple books"
+            
+            answer = rag_answer(question, context_chunks, source_titles)
+            
+            sources = [{'index': i+1, 'text': c[:200]+'...' if len(c)>200 else c} for i,c in enumerate(context_chunks)]
+            
             qa = QAHistory.objects.create(
                 question=question,
                 answer=answer,
@@ -284,7 +303,7 @@ class SeedBooksView(APIView):
             {
                 'title': 'The Great Gatsby',
                 'author': 'F. Scott Fitzgerald',
-                'description': 'A novel set in the Jazz Age on Long Island, near New York City. The novel depicts first-person narrator Nick Carraway\'s interactions with mysterious millionaire Jay Gatsby and explores themes of decadence, idealism, resistance to change, social upheaval, and excess.',
+                'description': "A novel set in the Jazz Age on Long Island, near New York City. The novel depicts first-person narrator Nick Carraway's interactions with mysterious millionaire Jay Gatsby and explores themes of decadence, idealism, resistance to change, social upheaval, and excess.",
                 'rating': 4.5,
                 'genre': 'Fiction',
                 'cover_url': 'https://covers.openlibrary.org/b/id/7222246-L.jpg',
@@ -336,7 +355,7 @@ class SeedBooksView(APIView):
                 'book_url': 'https://www.gutenberg.org/ebooks/20022'
             },
             {
-                'title': 'Harry Potter and the Sorcerer\'s Stone',
+                'title': "Harry Potter and the Sorcerer's Stone",
                 'author': 'J.K. Rowling',
                 'description': 'The first novel in the Harry Potter series, following a young wizard as he discovers his magical heritage and begins his education at Hogwarts School of Witchcraft and Wizardry.',
                 'rating': 4.9,
@@ -362,14 +381,15 @@ class SeedBooksView(APIView):
             text_content = f"{book.title} {book.author} {book.description}"
             chunks = chunk_text(text_content, settings.CHUNK_SIZE, settings.CHUNK_OVERLAP)
             
-            for i, chunk_text in enumerate(chunks):
+            for i, chunk_content in enumerate(chunks):
                 BookChunk.objects.create(
                     book=book,
-                    chunk_text=chunk_text,
+                    chunk_text=chunk_content,
                     chunk_index=i
                 )
             
             add_chunks_to_vector_store(book.id, chunks)
+            add_chunks_to_global_store(book.id, book.title, chunks)
             created_books.append(book.id)
         
         return Response({

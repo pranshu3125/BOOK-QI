@@ -41,6 +41,7 @@ class AIInsights(models.Model):
     summary = models.TextField(blank=True)
     genre_prediction = models.CharField(max_length=100, blank=True)
     sentiment = models.CharField(max_length=50, blank=True)
+    sentiment_score = models.FloatField(null=True, blank=True)
     recommendations = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

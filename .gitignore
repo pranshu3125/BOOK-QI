@@ -39,3 +39,6 @@ dist/
 
 # ChromaDB
 chroma_data/
+
+# Django Cache
+django_cache/
