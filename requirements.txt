@@ -1,0 +1,10 @@
+djangorestframework
+django-cors-headers
+chromadb
+sentence-transformers
+selenium
+beautifulsoup4
+webdriver-manager
+python-dotenv
+requests
+numpy
