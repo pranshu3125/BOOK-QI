@@ -52,12 +52,31 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'backend.wsgi.application'
 
+# MySQL Database Configuration
+# Set up MySQL via environment variables, fall back to SQLite for development
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': os.environ.get('MYSQL_DATABASE', 'bookqi_db'),
+        'USER': os.environ.get('MYSQL_USER', 'root'),
+        'PASSWORD': os.environ.get('MYSQL_PASSWORD', ''),
+        'HOST': os.environ.get('MYSQL_HOST', 'localhost'),
+        'PORT': os.environ.get('MYSQL_PORT', '3306'),
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            'charset': 'utf8mb4',
+        },
     }
 }
+
+# Fallback to SQLite if MySQL is not available (development mode)
+if os.environ.get('USE_SQLITE', 'false').lower() == 'true':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -78,7 +97,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOW_ALL_ORIGINS = True
 
-# Django Cache Configuration (FEATURE 3)
+# Django Cache Configuration
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
@@ -96,16 +115,26 @@ REST_FRAMEWORK = {
     ],
 }
 
-# ChromaDB Settings
+# ChromaDB Vector Store Settings
 CHROMA_PERSIST_DIRECTORY = BASE_DIR / 'chroma_data'
 
-# Embedding Settings
+# Text Chunking Settings
 EMBEDDING_MODEL = 'sentence-transformers/all-MiniLM-L6-v2'
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
+CHUNK_STRATEGY = os.environ.get('CHUNK_STRATEGY', 'overlapping')  # 'overlapping' or 'semantic'
 
-# LLM Settings (FEATURE 4)
-LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'lmstudio')  # 'lmstudio' or 'claude'
+# LLM Settings
+LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'lmstudio')
 LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'http://localhost:1234/v1')
 LLM_MODEL = os.environ.get('LLM_MODEL', 'local-model')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+
+# Cache Settings
+CACHE_TTL = int(os.environ.get('CACHE_TTL', 86400))  # 24 hours default
+CACHE_ENABLED = os.environ.get('CACHE_ENABLED', 'true').lower() == 'true'
+
+# Async Task Settings
+ASYNC_ENABLED = os.environ.get('ASYNC_ENABLED', 'false').lower() == 'true'
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
