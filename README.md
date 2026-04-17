@@ -55,7 +55,17 @@ This project was built as a demonstration of full-stack development skills with 
 
 ## Features Implemented
 
-### 1. Book Management
+### 1. Book Management - Screenshots
+
+**Dashboard - Book Listing**
+![Dashboard](screenshots/Screenshot%202026-04-17%20175549.png)
+
+**Book Detail Page with AI Insights**
+![Book Detail](screenshots/Screenshot%202026-04-17%20180300.png)
+
+---
+
+### 2. Book Management
 - Database storage of book metadata (title, author, description, rating, genre, cover URL)
 - Search and genre-based filtering
 - Related book recommendations based on genre and author
