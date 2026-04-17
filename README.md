@@ -41,7 +41,7 @@ BOOK-QI is a full-stack web application that demonstrates document intelligence 
 |-------|------------|
 | Frontend | Next.js 14 (App Router) + Tailwind CSS |
 | Backend | Django + Django REST Framework |
-| Database | MySQL (metadata) + ChromaDB (vectors) |
+| Database | SQLite (default) or MySQL + ChromaDB (vectors) |
 | AI | OpenAI / Claude / LM Studio |
 | Embeddings | sentence-transformers (all-MiniLM-L6-v2) |
 | Scraping | Selenium + BeautifulSoup |
